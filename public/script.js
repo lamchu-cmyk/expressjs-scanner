@@ -21,44 +21,62 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Handle "Open All URLs" button
     if (openAllBtn) {
-        openAllBtn.addEventListener('click', function() {
-            // Grab the actual <a> elements only, then de-duplicate
+        openAllBtn.addEventListener('click', function () {
+            // Lấy và khử trùng lặp URL
             const urls = Array.from(
                 new Set(
                     Array.from(document.querySelectorAll('.url-link'))
                          .map(el => el.dataset.url)
                 )
             );
-            
+
             if (urls.length === 0) {
                 alert('No URLs to open!');
                 return;
             }
 
-            // Confirmation dialog for opening many URLs
             if (urls.length > 5) {
                 const confirmMessage = `This will open ${urls.length} new tabs. Are you sure you want to continue?`;
-                if (!confirm(confirmMessage)) {
-                    return;
-                }
+                if (!confirm(confirmMessage)) return;
             }
 
-            // Open all URLs with a small delay between each to avoid browser blocking
-            urls.forEach((url, index) => {
-                setTimeout(() => {
-                    window.open(url, '_blank');
-                }, index * 100); // 100ms delay between each URL
-            });
+            const batchSize     = 10;     // Số tab mở mỗi đợt
+            const dwellTimeMs   = 15000;  // Giữ tab bao lâu (ms) trước khi đóng
 
-            // Update button text temporarily
+            // Hàm tiện ích đợi n ms
+            const delay = ms => new Promise(res => setTimeout(res, ms));
+
+            // IIFE async để dùng await
+            (async () => {
+                for (let i = 0; i < urls.length; i += batchSize) {
+                    const batch = urls.slice(i, i + batchSize);
+
+                    // 1. Mở tab và lưu handle
+                    const opened = batch.map(u => window.open(u, '_blank'));
+
+                    // 2. Chờ người dùng xem (hoặc trang được tải)
+                    await delay(dwellTimeMs);
+
+                    // 3. Đóng các tab vừa mở
+                    opened.forEach(w => { try { w.close(); } catch(_) {} });
+                }
+
+                // Hoàn tất – báo cho người dùng (tuỳ chọn)
+                alert('All URLs have been opened and closed!');
+            })();
+
+            // Feedback UI
             const originalText = openAllBtn.innerHTML;
-            openAllBtn.innerHTML = '<i class="fas fa-check me-2"></i>Opening...';
+            openAllBtn.innerHTML = '<i class="fas fa-check me-2"></i>Working...';
             openAllBtn.disabled = true;
 
+            // Bật lại nút sau tổng thời gian ước tính
+            const totalBatches   = Math.ceil(urls.length / batchSize);
+            const totalDuration  = totalBatches * dwellTimeMs;
             setTimeout(() => {
                 openAllBtn.innerHTML = originalText;
-                openAllBtn.disabled = false;
-            }, urls.length * 100 + 1000);
+                openAllBtn.disabled  = false;
+            }, totalDuration + 500);
         });
     }
 
