@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="/style.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-10">
+                <div class="text-center mb-5">
+                    <h1 class="display-4 text-primary">
+                        <a href="/" class="text-decoration-none" style="color: inherit;">
+                            <i class="fas fa-search me-3"></i>URL Scanner
+                        </a>
+                    </h1>
+                    <p class="lead text-muted">Quét Website và tự động mở tất cả các liên kết được tìm thấy</p>
+                </div>
+
+                <!-- URL Input Form -->
+                <div class="card shadow mb-4">
+                    <div class="card-body">
+                        <form action="/scan" method="POST" id="scanForm">
+                            <div class="input-group input-group-lg">
+                                <span class="input-group-text">
+                                    <i class="fas fa-globe"></i>
+                                </span>
+                                <input 
+                                    type="text" 
+                                    class="form-control" 
+                                    name="url" 
+                                    id="urlInput"
+                                    placeholder="Nhập URL website (ví dụ: example.com hoặc https://example.com)"
+                                    required
+                                >
+                                <button class="btn btn-primary" type="submit" id="scanBtn">
+                                    <i class="fas fa-search me-2"></i>Quét URL
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Error Messages -->
+                <% if (error) { %>
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <%= error %>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                <% } %>
+
+                <!-- Results Section -->
+                <% if (urls && urls.length > 0) { %>
+                    <div class="card shadow">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0">
+                                <i class="fas fa-check-circle me-2"></i>
+                                Found <%= urls.length %> URLs from 
+                                <strong><%= scannedUrl %></strong>
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <p class="text-muted mb-0">Nhấn vào bất kỳ URL nào để mở nó trong tab mới</p>
+                                <button class="btn btn-outline-primary" id="openAllBtn">
+                                    <i class="fas fa-external-link-alt me-2"></i>Mở tất cả URL
+                                </button>
+                            </div>
+                            
+                            <div class="url-list">
+                                <% urls.forEach((link, index) => { %>
+                                    <div class="url-item mb-3 p-3 border rounded">
+                                        <div class="d-flex justify-content-between align-items-start">
+                                            <div class="flex-grow-1 me-3">
+                                                <h6 class="mb-1">
+                                                    <a href="<%= link.url %>" 
+                                                       target="_blank" 
+                                                       class="text-decoration-none url-link"
+                                                       data-url="<%= link.url %>">
+                                                        <i class="fas fa-external-link-alt me-2 text-muted"></i>
+                                                        <%= link.url %>
+                                                    </a>
+                                                </h6>
+                                                <small class="text-muted d-block">
+                                                    <%= link.url %>
+                                                </small>
+                                                <% if (link.title && link.title !== link.text) { %>
+                                                    <small class="text-info d-block mt-1">
+                                                        <i class="fas fa-info-circle me-1"></i>
+                                                        <%= link.title %>
+                                                    </small>
+                                                <% } %>
+                                            </div>
+                                            <button class="btn btn-sm btn-outline-primary open-single-btn" 
+                                                    data-url="<%= link.url %>">
+                                                <i class="fas fa-external-link-alt"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                <% }); %>
+                            </div>
+                        </div>
+                    </div>
+                <% } else if (urls && urls.length === 0) { %>
+                    <div class="alert alert-warning" role="alert">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Không tìm thấy URL nào trên trang web đã quét.
+                    </div>
+                <% } %>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Modal -->
+    <div class="modal fade" id="loadingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-body text-center p-4">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h5>Đang quét trang web...</h5>
+                    <p class="text-muted mb-0">Vui lòng chờ trong khi phân tích trang web để tìm URL</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/script.js"></script>
+</body>
+</html> 

@@ -1,0 +1,22 @@
+{
+  "name": "scan-to-cache",
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["express", "puppeteer", "url-scanner"],
+  "author": "",
+  "license": "ISC",
+  "description": "Express app that scans websites for URLs and opens them in new tabs",
+  "dependencies": {
+    "express": "^4.18.2",
+    "puppeteer": "^21.5.2",
+    "ejs": "^3.1.9"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
