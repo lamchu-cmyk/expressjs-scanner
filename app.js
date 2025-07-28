@@ -118,6 +118,91 @@ app.post('/scan', async (req, res) => {
     }
 });
 
+/* ===== helper: đợi trang thật sự load xong ===== */
+async function waitUntilLoaded(rawUrl) {
+    const browser = await puppeteer.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+
+    // Thêm protocol nếu thiếu
+    let url = rawUrl;
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+    /* 1. Chỉ cần DOM sẵn trước đã */
+    await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout  : 120_000        // 2 phút
+    });
+
+    /* 2. Đợi tới khi sự kiện load hoàn tất */
+    await page.waitForFunction(
+        () => document.readyState === 'complete',
+        { timeout: 120_000 }
+    );
+
+    /* 3. Đợi tất cả ảnh/iframe đã hoàn thành */
+    await page.waitForFunction(
+        () => [...document.images].every(img => img.complete),
+        { timeout: 120_000 }
+    );
+
+    /* 4. Tự dựng “network-idle”: không còn request nào
+          trong 1 giây */
+    await waitForNetworkIdle(page, 1000, 120_000);
+
+    await browser.close();
+}
+
+/* ===== util chờ network-idle ===== */
+function waitForNetworkIdle(page, idleMillis = 1000, timeout = 60_000) {
+    return new Promise((resolve, reject) => {
+        let inflight = 0;
+        let idleTimer;
+
+        function onRequest()   { ++inflight; clearTimeout(idleTimer); }
+        function onComplete()  {
+            if (inflight > 0) --inflight;
+            if (inflight === 0) idleTimer = setTimeout(done, idleMillis);
+        }
+        function done() {
+            cleanup();
+            resolve();
+        }
+        function cleanup(err) {
+            page.removeListener('request', onRequest);
+            page.removeListener('requestfinished', onComplete);
+            page.removeListener('requestfailed', onComplete);
+            clearTimeout(idleTimer);
+            if (err) reject(err);
+        }
+
+        page.on('request',         onRequest);
+        page.on('requestfinished', onComplete);
+        page.on('requestfailed',   onComplete);
+
+        // Hết giờ
+        idleTimer = setTimeout(
+            () => cleanup(new Error('network idle timeout')),
+            timeout + idleMillis
+        );
+    });
+}
+
+/* ===== API: POST /check-load { url } ===== */
+app.post('/check-load', async (req,res) => {
+    const { url } = req.body;
+    if(!url) return res.status(400).json({ ok:false, error:'Missing url' });
+
+    try{
+        await waitUntilLoaded(url);
+        return res.json({ ok:true });
+    }catch(err){
+        return res.status(500).json({ ok:false, error: err.message });
+    }
+});
+
 // Start server
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);

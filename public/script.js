@@ -1,8 +1,15 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const scanForm = document.getElementById('scanForm');
-    const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
-    const openAllBtn = document.getElementById('openAllBtn');
+    const scanForm      = document.getElementById('scanForm');
+    const loadingModal  = new bootstrap.Modal(document.getElementById('loadingModal'));
+    const openAllBtn    = document.getElementById('openAllBtn');
+    const stopAllBtn    = document.getElementById('stopAllBtn');
+    const cancelScanBtn = document.getElementById('cancelScanBtn');
     const openSingleBtns = document.querySelectorAll('.open-single-btn');
+
+    let stopRequested = false;   // <--- cờ dừng toàn cục
+    let openedTabs    = [];      // <--- tập các tab đang mở ở batch hiện tại
+    let delayTimeout  = null;    // <--- timeout chờ đóng batch
+    let delayResolver = null;    // <--- hàm resolve của Promise chờ đóng
 
     // Show loading modal when form is submitted
     scanForm.addEventListener('submit', function(e) {
@@ -22,6 +29,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Handle "Open All URLs" button
     if (openAllBtn) {
         openAllBtn.addEventListener('click', function () {
+            stopRequested = false;          // reset cờ
+            stopAllBtn.disabled = false;    // bật nút dừng
+
             // Lấy và khử trùng lặp URL
             const urls = Array.from(
                 new Set(
@@ -49,34 +59,81 @@ document.addEventListener('DOMContentLoaded', function() {
             // IIFE async để dùng await
             (async () => {
                 for (let i = 0; i < urls.length; i += batchSize) {
+                    if (stopRequested) break;                 // thoát nếu người dùng nhấn dừng
                     const batch = urls.slice(i, i + batchSize);
 
                     // 1. Mở tab và lưu handle
-                    const opened = batch.map(u => window.open(u, '_blank'));
+                    openedTabs = batch.map(u => {
+                        /* gọi check-load cho từng URL */
+                        fetch('/check-load',{
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body:JSON.stringify({ url: u })
+                        })
+                        .then(r=>r.json())
+                        .then(d=>{
+                            console.log(`[${u}]`, d.ok ? 'Loaded' : 'Fail:', d.error);
+                        })
+                        .catch(console.error);
 
-                    // 2. Chờ người dùng xem (hoặc trang được tải)
-                    await delay(dwellTimeMs);
+                        return window.open(u, '_blank');
+                    });
+
+                    // 2. Chờ trong dwellTimeMs – có thể huỷ giữa chừng
+                    await new Promise(res => {
+                        delayResolver = res;                      // lưu resolve
+                        delayTimeout  = setTimeout(res, dwellTimeMs);
+                    });
 
                     // 3. Đóng các tab vừa mở
-                    opened.forEach(w => { try { w.close(); } catch(_) {} });
+                    openedTabs.forEach(w => { try { w.close(); } catch(_) {} });
+                    openedTabs = [];
                 }
 
                 // Hoàn tất – báo cho người dùng (tuỳ chọn)
-                alert('All URLs have been opened and closed!');
+                const msg = stopRequested ? 'Đã dừng tác vụ.' : 'All URLs have been opened and closed!';
+                alert(msg);
+
+                // Khôi phục UI
+                openAllBtn.innerHTML = originalText;
+                openAllBtn.disabled  = false;
+                stopAllBtn.disabled  = true;
+                stopAllBtn.innerHTML = '<i class="fas fa-stop me-2"></i>Dừng';
             })();
 
             // Feedback UI
             const originalText = openAllBtn.innerHTML;
             openAllBtn.innerHTML = '<i class="fas fa-check me-2"></i>Working...';
             openAllBtn.disabled = true;
+        });
+    }
 
-            // Bật lại nút sau tổng thời gian ước tính
-            const totalBatches   = Math.ceil(urls.length / batchSize);
-            const totalDuration  = totalBatches * dwellTimeMs;
-            setTimeout(() => {
-                openAllBtn.innerHTML = originalText;
-                openAllBtn.disabled  = false;
-            }, totalDuration + 500);
+    // Nút Dừng cho chuỗi "Mở tất cả URL"
+    if (stopAllBtn) {
+        stopAllBtn.addEventListener('click', function () {
+            stopRequested  = true;
+            this.disabled  = true;
+            this.innerHTML = '<i class="fas fa-check me-2"></i>Đã dừng';
+
+            // Huỷ timeout đang chờ (nếu có) và đóng các tab còn mở
+            if (delayTimeout) {
+                clearTimeout(delayTimeout);
+                delayTimeout = null;
+            }
+            if (delayResolver) {          // giải phóng Promise ngay
+                delayResolver();
+                delayResolver = null;
+            }
+            openedTabs.forEach(w => { try { w.close(); } catch(_) {} });
+            openedTabs = [];
+        });
+    }
+
+    // Nút Dừng cho quá trình quét URL (trong modal)
+    if (cancelScanBtn) {
+        cancelScanBtn.addEventListener('click', function () {
+            loadingModal.hide();        // ẩn modal
+            window.location.href = '/'; // quay về trang chủ, hủy chờ phản hồi
         });
     }
 
@@ -88,6 +145,18 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (url) {
                 window.open(url, '_blank');
+
+                /* NEW: hỏi server xem trang đã load xong chưa */
+                fetch('/check-load',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({ url })
+                })
+                .then(r=>r.json())
+                .then(data=>{
+                    console.log('✓', url, data.ok ? 'đã load xong' : 'lỗi:', data.error);
+                })
+                .catch(console.error);
                 
                 // Visual feedback
                 const originalIcon = this.innerHTML;
