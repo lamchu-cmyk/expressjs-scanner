@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let openedTabs    = [];      // <--- tập các tab đang mở ở batch hiện tại
     let delayTimeout  = null;    // <--- timeout chờ đóng batch
     let delayResolver = null;    // <--- hàm resolve của Promise chờ đóng
+    let currentController = null; // <--- AbortController cho các yêu cầu fetch
 
     // Show loading modal when form is submitted
     scanForm.addEventListener('submit', function(e) {
@@ -51,7 +52,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             const batchSize     = 10;     // Số tab mở mỗi đợt
-            const dwellTimeMs   = 15000;  // Giữ tab bao lâu (ms) trước khi đóng
+            const maxBatchWait  = 60000;  // Timeout an toàn (ms)
 
             // Hàm tiện ích đợi n ms
             const delay = ms => new Promise(res => setTimeout(res, ms));
@@ -62,31 +63,78 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (stopRequested) break;                 // thoát nếu người dùng nhấn dừng
                     const batch = urls.slice(i, i + batchSize);
 
-                    // 1. Mở tab và lưu handle
-                    openedTabs = batch.map(u => {
-                        /* gọi check-load cho từng URL */
-                        fetch('/check-load',{
-                            method:'POST',
-                            headers:{'Content-Type':'application/json'},
-                            body:JSON.stringify({ url: u })
-                        })
-                        .then(r=>r.json())
-                        .then(d=>{
-                            console.log(`[${u}]`, d.ok ? 'Loaded' : 'Fail:', d.error);
-                        })
-                        .catch(console.error);
+                    /* ----- 1. Mở các tab trong lô ----- */
+                    openedTabs = batch.map(u => window.open(u, '_blank'));
 
-                        return window.open(u, '_blank');
-                    });
+                    // 1. Sau khi mở tabs:
+                    const openedMap = new Map(); // URL => tab window
+                    batch.forEach((u, i) => openedMap.set(u, openedTabs[i]));
 
-                    // 2. Chờ trong dwellTimeMs – có thể huỷ giữa chừng
-                    await new Promise(res => {
-                        delayResolver = res;                      // lưu resolve
-                        delayTimeout  = setTimeout(res, dwellTimeMs);
-                    });
+                    // 2. Đợi kết quả từ server
+                    currentController = new AbortController();          // tạo controller mới
+                    let resp;
+                    try {
+                        resp = await fetch('/check-load/batch', {
+                            method : 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body   : JSON.stringify({ urls: batch }),
+                            signal : currentController.signal            // <--- gắn signal
+                        }).then(r => r.json());
+                    } catch (e) {
+                        if (stopRequested && e.name === 'AbortError') break; // bị hủy
+                        throw e;             // lỗi thực sự khác
+                    }
 
-                    // 3. Đóng các tab vừa mở
-                    openedTabs.forEach(w => { try { w.close(); } catch(_) {} });
+                    // 3. Đóng từng tab nếu nó đã load xong
+                    for (const [url, result] of Object.entries(resp.results)) {
+                        if (result.ok) {
+                            const tab = openedMap.get(url);
+                            if (tab) try { tab.close(); } catch (e) {}
+                            openedMap.delete(url);
+                        }
+                    }
+
+                    // 4. CHỜ CHO TỚI KHI TẤT CẢ TAB ĐÃ ĐÓNG HOẶC HẾT THỜI GIAN AN TOÀN
+                    const pollInterval = 2000;  // 2 s/lần hỏi lại
+                    let   waited       = 0;
+
+                    while (openedMap.size > 0 && waited < maxBatchWait) {
+                        // Đợi 2 s
+                        await new Promise(res => setTimeout(res, pollInterval));
+                        waited += pollInterval;
+
+                        // Hỏi lại server những URL còn đang mở
+                        const stillOpen = Array.from(openedMap.keys());
+                        currentController = new AbortController();
+                        let resp2;
+                        try {
+                            resp2 = await fetch('/check-load/batch', {
+                                method : 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body   : JSON.stringify({ urls: stillOpen }),
+                                signal : currentController.signal
+                            }).then(r => r.json());
+                        } catch (e) {
+                            if (stopRequested && e.name === 'AbortError') break;
+                            throw e;
+                        }
+
+                        // Đóng những tab đã load xong ở lần hỏi lại
+                        for (const [url, result] of Object.entries(resp2.results)) {
+                            if (result.ok) {
+                                const tab = openedMap.get(url);
+                                if (tab) try { tab.close(); } catch (e) {}
+                                openedMap.delete(url);
+                            }
+                        }
+                    }
+
+                    // Hết thời gian an toàn – đóng cưỡng bức những tab còn lại (nếu có)
+                    for (const [url, tab] of openedMap.entries()) {
+                        try { tab.close(); } catch (e) {}
+                    }
+
+                    /* ----- 3. Đóng các tab còn sót & chuẩn bị lô mới ----- */
                     openedTabs = [];
                 }
 
@@ -114,6 +162,12 @@ document.addEventListener('DOMContentLoaded', function() {
             stopRequested  = true;
             this.disabled  = true;
             this.innerHTML = '<i class="fas fa-check me-2"></i>Đã dừng';
+
+            /* Huỷ mọi yêu cầu fetch đang chờ */
+            if (currentController) {
+                try { currentController.abort(); } catch (_) {}
+                currentController = null;
+            }
 
             // Huỷ timeout đang chờ (nếu có) và đóng các tab còn mở
             if (delayTimeout) {
@@ -219,10 +273,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     this.setAttribute('placeholder', `Will scan: https://${url}`);
                 }
             }
-        });
-
-        urlInputField.addEventListener('focus', function() {
-            this.setAttribute('placeholder', 'Enter website URL (e.g., example.com or https://example.com)');
         });
     }
 
